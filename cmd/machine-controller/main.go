@@ -55,6 +55,7 @@ import (
 	machinehealth "github.com/kubermatic/machine-controller/pkg/health"
 	machinesv1alpha1 "github.com/kubermatic/machine-controller/pkg/machines/v1alpha1"
 	"github.com/kubermatic/machine-controller/pkg/signals"
+	"github.com/kubermatic/machine-controller/pkg/userdata/helper"
 
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/klog"
@@ -76,6 +77,7 @@ var (
 	skipEvictionAfter                time.Duration
 	nodeCSRApprover                  bool
 
+	nodeContainerRuntime   string
 	nodeHTTPProxy          string
 	nodeNoProxy            string
 	nodeInsecureRegistries string
@@ -168,6 +170,7 @@ func main() {
 	flag.StringVar(&nodePauseImage, "node-pause-image", "", "Image for the pause container including tag. If not set, the kubelet default will be used: https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/")
 	flag.StringVar(&nodeHyperkubeImage, "node-hyperkube-image", "k8s.gcr.io/hyperkube-amd64", "Image for the hyperkube container excluding tag. Only has effect on CoreOS Container Linux and Flatcar Linux, and for kubernetes < 1.18.")
 	flag.StringVar(&nodeKubeletRepository, "node-kubelet-repository", "quay.io/poseidon/kubelet", "Repository for the kubelet container. Only has effect on Flatcar Linux, and for kubernetes >= 1.18.")
+	flag.StringVar(&nodeContainerRuntime, "node-container-runtime", "docker-ce", "container-runtime to deploy")
 	flag.BoolVar(&nodeCSRApprover, "node-csr-approver", false, "Enable NodeCSRApprover controller to automatically approve node serving certificate requests.")
 
 	flag.Parse()
@@ -264,6 +267,7 @@ func main() {
 			HyperkubeImage:    nodeHyperkubeImage,
 			KubeletRepository: nodeKubeletRepository,
 			PauseImage:        nodePauseImage,
+			ContainerRuntime:  helper.GetContainerRuntime(nodeContainerRuntime),
 		},
 	}
 	if parsedJoinClusterTimeout != nil {

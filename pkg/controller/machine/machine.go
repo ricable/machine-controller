@@ -38,6 +38,7 @@ import (
 	"github.com/kubermatic/machine-controller/pkg/providerconfig"
 	providerconfigtypes "github.com/kubermatic/machine-controller/pkg/providerconfig/types"
 	"github.com/kubermatic/machine-controller/pkg/rhsm"
+	"github.com/kubermatic/machine-controller/pkg/userdata/helper"
 	userdatamanager "github.com/kubermatic/machine-controller/pkg/userdata/manager"
 	userdataplugin "github.com/kubermatic/machine-controller/pkg/userdata/plugin"
 	"github.com/kubermatic/machine-controller/pkg/userdata/rhel"
@@ -128,6 +129,8 @@ type NodeSettings struct {
 	HyperkubeImage string
 	// The kubelet repository to use. Currently only Flatcar Linux uses it.
 	KubeletRepository string
+	// ContainerRuntime to deploy
+	ContainerRuntime helper.ContainerRuntime
 }
 
 type KubeconfigProvider interface {
@@ -701,7 +704,9 @@ func (r *Reconciler) ensureInstanceExistsForMachine(
 				KubeletRepository:     r.nodeSettings.KubeletRepository,
 				NoProxy:               r.nodeSettings.NoProxy,
 				HTTPProxy:             r.nodeSettings.HTTPProxy,
+				ContainerRuntime:      r.nodeSettings.ContainerRuntime.String(),
 			}
+
 			userdata, err := userdataPlugin.UserData(req)
 			if err != nil {
 				return nil, fmt.Errorf("failed get userdata: %v", err)

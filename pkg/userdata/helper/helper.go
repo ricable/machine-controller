@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"text/template"
 
 	"github.com/Masterminds/semver"
 
@@ -113,6 +114,116 @@ type dockerConfig struct {
 	RegistryMirrors    []string          `json:"registry-mirrors,omitempty"`
 }
 
+var (
+	dockerCEYumTemplate = template.Must(template.New("docker-ce-yum").Parse(`
+yum install -y yum-utils
+yum-config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+{{- /*
+	Due to DNF modules we have to do this on docker-ce repo
+	More info at: https://bugzilla.redhat.com/show_bug.cgi?id=1756473
+*/}}
+yum-config-manager --save --setopt=docker-ce-stable.module_hotfixes=true
+
+DOCKER_VERSION='{{ .DockerVersion }}'
+
+mkdir -p /etc/systemd/system/docker.service.d
+cat <<EOF | tee /etc/systemd/system/docker.service.d/environment.conf
+[Service]
+Restart=always
+EnvironmentFile=-/etc/environment
+EOF
+
+yum install -y \
+    docker-ce-${DOCKER_VERSION} docker-ce-cli-${DOCKER_VERSION} \
+    yum-plugin-versionlock
+yum versionlock add docker-ce-*
+systemctl enable --now docker
+`))
+
+	dockerCEAptTemplate = template.Must(template.New("docker-ce-apt").Parse(`
+apt-get update
+apt-get install -y apt-transport-https ca-certificates curl software-properties-common lsb-release
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+add-apt-repository "deb https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+
+mkdir -p /etc/systemd/system/docker.service.d
+cat <<EOF | tee /etc/systemd/system/docker.service.d/environment.conf
+[Service]
+Restart=always
+EnvironmentFile=-/etc/environment
+EOF
+
+apt-get update
+apt-get install -y \
+    containerd.io=1.2.13-2 \
+    docker-ce=5:19.03.11~3-0~ubuntu-$(lsb_release -cs) \
+    docker-ce-cli=5:19.03.11~3-0~ubuntu-$(lsb_release -cs)
+`))
+
+	containerdYumTemplate = template.Must(template.New("containerd-yum").Parse(`
+yum install -y yum-utils
+yum-config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+{{- /*
+	Due to DNF modules we have to do this on docker-ce repo
+	More info at: https://bugzilla.redhat.com/show_bug.cgi?id=1756473
+*/}}
+yum-config-manager --save --setopt=docker-ce-stable.module_hotfixes=true
+yum install -y containerd.io-1.2.13 yum-plugin-versionlock
+yum versionlock add containerd.io
+
+mkdir -p /etc/containerd
+containerd config default | sed -e 's/systemd_cgroup = false/systemd_cgroup = true/' > /etc/containerd/config.toml
+
+mkdir -p /etc/systemd/system/containerd.service.d
+cat <<EOF | tee /etc/systemd/system/containerd.service.d/environment.conf
+[Service]
+Restart=always
+EnvironmentFile=-/etc/environment
+EOF
+
+systemctl daemon-reload
+systemctl enable --now containerd
+`))
+
+	containerdAptTemplate = template.Must(template.New("containerd-apt").Parse(`
+apt-get update
+apt-get install -y apt-transport-https ca-certificates curl software-properties-common lsb-release
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+add-apt-repository "deb https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+apt-get install -y containerd.io=1.2.13-2
+
+mkdir -p /etc/containerd
+containerd config default | sed -e 's/systemd_cgroup = false/systemd_cgroup = true/' > /etc/containerd/config.toml
+
+mkdir -p /etc/systemd/system/containerd.service.d
+cat <<EOF | tee /etc/systemd/system/containerd.service.d/environment.conf
+[Service]
+Restart=always
+EnvironmentFile=-/etc/environment
+EOF
+
+systemctl daemon-reload
+systemctl enable --now containerd
+`))
+)
+
+func InstallContainerRuntimeScript(packageManager, cr, kubeletVersion string) (string, error) {
+	var buf strings.Builder
+
+	switch fmt.Sprintf("%s %s", cr, packageManager) {
+	case "docker-ce apt":
+		return buf.String(), dockerCEAptTemplate.Execute(&buf, nil)
+	case "docker-ce yum":
+		return buf.String(), dockerCEYumTemplate.Execute(&buf, nil)
+	case "containerd apt":
+		return buf.String(), containerdAptTemplate.Execute(&buf, nil)
+	case "containerd yum":
+		return buf.String(), containerdYumTemplate.Execute(&buf, nil)
+	}
+
+	return "", fmt.Errorf("container runtime: %s / package manager: %s are not a supported", cr, packageManager)
+}
+
 // DockerConfig returns the docker daemon.json.
 func DockerConfig(insecureRegistries, registryMirrors []string) (string, error) {
 	cfg := dockerConfig{
@@ -202,4 +313,33 @@ else
   echo -e "[Service]\nEnvironment=\"KUBELET_NODE_IP=${DEFAULT_IFC_IP}\"" > /etc/systemd/system/kubelet.service.d/nodeip.conf
 fi
 	`
+}
+
+// ContainerRuntime zero-vaulue equals to ContainerRuntimeDockerCE
+type ContainerRuntime int
+
+const (
+	ContainerRuntimeDockerCE ContainerRuntime = iota
+	ContainerRuntimeContainerd
+)
+
+var (
+	stringToContainerRuntimeMap = map[string]ContainerRuntime{
+		"docker-ce":  ContainerRuntimeDockerCE,
+		"containerd": ContainerRuntimeContainerd,
+	}
+)
+
+func (cr ContainerRuntime) String() string {
+	for k, v := range stringToContainerRuntimeMap {
+		if v == cr {
+			return k
+		}
+	}
+
+	return "docker-ce"
+}
+
+func GetContainerRuntime(containerRuntime string) ContainerRuntime {
+	return stringToContainerRuntimeMap[containerRuntime]
 }

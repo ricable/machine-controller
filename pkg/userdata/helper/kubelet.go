@@ -34,6 +34,8 @@ const (
 	kubeletFlagsTpl = `--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf \
 --kubeconfig=/var/lib/kubelet/kubeconfig \
 --config=/etc/kubernetes/kubelet.conf \
+--container-runtime=docker \
+--container-runtime-endpoint=unix:///var/run/dockershim.sock \
 {{- if semverCompare "<1.15.0-0" .KubeletVersion }}
 --allow-privileged=true \
 {{- end }}
